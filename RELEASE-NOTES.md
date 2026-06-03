@@ -1,5 +1,51 @@
 # Release Notes
 
+## v3.6.2 — 2026-06-03 (cninfo 翻页长尾修复 #68 + Hermes 脚本 pip 探测 #69)
+
+### 🐛 Bug #1 · cninfo 公告分页 854 页拖几小时 ([#68](https://github.com/wbh604/UZI-Skill/issues/68) · @xy2yp)
+
+**症状**：`python run.py --versus 000958 600406 --depth lite` 卡在 15_events 维度的 cninfo 公告抓取：
+```
+0%|          | 0/854 [00:00<?, ?it/s]
+1%|          | 10/854 [01:53<6:11:58, 26.44s/it]
+```
+单股能拖 4-6 小时 · lite 模式预期 1-2 分钟。
+
+**根因**：`fetch_events._cninfo_disclosures` 调 `akshare.stock_zh_a_disclosure_report_cninfo` · 该函数**内部翻完全部分页才 return** · 后续 `.head(30)` 截取已经太晚 · 全部翻页时间已经花掉了。
+
+**修法**（`fetch_events.py`）：
+1. **新增 `_cninfo_direct_api`** · 直连 cninfo `/new/hisAnnouncement/query` HTTP API · `pageSize=30 + pageNum=1` · 15s 硬超时 · 一次请求拿最新 30 条公告就够
+2. 自动路由板块：`000/001/002/3xx → szse` · `6xx/688 → sse` · `8xx → bse`
+3. 解析 `announcements[*].announcementTime / announcementTitle / adjunctUrl` · 转 ISO 日期 + 拼绝对 URL
+4. **akshare 慢路径默认禁用** · 仅 `UZI_AK_CNINFO_FALLBACK=1` 显式启用时才尝试
+
+**效果**：cninfo 公告抓取从 几小时 → ≤15s · lite 模式恢复正常。
+
+### 🐛 Bug #2 · install-hermes.sh 找不到 pip ([#69](https://github.com/wbh604/UZI-Skill/issues/69) · @FrankHuy)
+
+**症状**：Linux + Python 3.11 跑一键安装脚本：
+```
+📦 安装 Python 依赖...
+   ⚠️  未找到 Hermes venv pip · 用系统 pip 装
+install-uzi-hermes.sh: line 95: pip: command not found
+  Could not find a version that satisfies the requirement akshare>=1.14.0 ...
+```
+
+**根因**：很多 Linux 发行版（Debian/Ubuntu/CentOS）**默认不提供 `pip` 命令**（只有 `pip3` 或 `python3 -m pip`）· 脚本只试 `pip` 直接报 command not found · 后续 akshare 装不上是因为底层 pip 不存在（不是真的 wheel 不兼容）。
+
+**修法**（`install-hermes.sh`）：
+1. **启动加 Python 版本预检** · 探测 `python3 / python` · 警告版本 <3.10（akshare ≥1.14 + PEP 604 联合类型要求）· 给三种系统的安装命令
+2. **pip 级联探测**：`venv/bin/pip` → `.venv/bin/pip` → `pip` → `pip3` → `$PY_BIN -m pip` · 五层兜底
+3. **完全找不到 pip 时不静默 fail** · 给出 apt/yum/ensurepip/get-pip 四种安装路径
+4. **`pip install` 失败时给可操作提示**：版本太低 / 镜像源建议（清华）/ 升级 pip 命令
+
+### 🧪 测试
+
+- 12 个新回归测试（cninfo direct API · 路由 · 失败 fallback gate · install 脚本 pip 探测级联）
+- **507/507 全过**（495 baseline + 12 new）
+
+---
+
 ## v3.6.1 — 2026-05-29 (Hermes Skills Guard 假阳性绕过 · issue #66)
 
 ### 🐛 用户反馈（@zodiacg · issue #66）

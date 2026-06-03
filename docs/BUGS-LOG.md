@@ -7,6 +7,48 @@
 
 ---
 
+## v3.6.2 (2026-06-03 · cninfo 翻页长尾 #68 + install-hermes.sh pip 探测 #69)
+
+### BUG #68 · cninfo 公告分页 854 页拖几小时
+
+- **症状**：用户 [@xy2yp](https://github.com/wbh604/UZI-Skill/issues/68) 反馈 `python run.py --versus 000958 600406 --depth lite` 卡在 15_events 维度 · 进度条 `0/854 [01:53<6:11:58, 26.44s/it]` · 单股 4-6 小时
+- **位置**：`skills/deep-analysis/scripts/fetch_events.py::_cninfo_disclosures`
+- **根因**：调 `akshare.stock_zh_a_disclosure_report_cninfo` · 该 akshare 函数内部用循环翻完全部分页（cninfo 一只票常有 800+ 页公告）才把 DataFrame 返给我们 · 后续 `.head(30)` 截取已无用 · 翻页时间已经花掉了
+- **修法**：
+  1. 新增 `_cninfo_direct_api(code, page_size=30, timeout=15)` · 直接 `requests.post` 到 `http://www.cninfo.com.cn/new/hisAnnouncement/query` · `pageNum=1 + pageSize=30` · 一次 HTTP ≤15s · 永远不翻全部页
+  2. 板块路由：`000/001/002/3xx → szse` · `6xx/688 → sse` · `8xx → bse`
+  3. 响应解析：`announcements[*].announcementTime` (毫秒) / `announcementTitle` / `adjunctUrl` (拼 `http://static.cninfo.com.cn/` 前缀)
+  4. `_cninfo_disclosures` 优先调直连 API · 直连失败时**默认不调 akshare**（防长尾）· 仅 `UZI_AK_CNINFO_FALLBACK=1` 显式启用时才走 akshare 慢路径
+- **验证**：
+  - mock `requests.post` ConnectionError → 返 [] · 不抛
+  - mock 200 + 合法 JSON → 解析正确 / 路由正确
+  - 网络失败 + 未设 fallback env → 不调 akshare（关键 · 防止再次踩坑）
+- **未来改该区域注意事项**：
+  - **永远不要回去用 `ak.stock_zh_a_disclosure_report_cninfo`** · 这是 akshare 实现的死结 · 它会翻完所有页
+  - 直连 API 的 pageSize 上限 cninfo 文档说 30 · 别贪心设大数字（会被服务端拒）
+  - cninfo 的时间戳是 **毫秒** · 不要忘了 `/ 1000` 再 `fromtimestamp`
+  - 板块路由 prefix 列表要保持齐：未来 cninfo 加新板块要更新（如果 北交所 8xx 后还有新代码段）
+
+### BUG #69 · install-hermes.sh 在 Linux 找不到 pip
+
+- **症状**：用户 [@FrankHuy](https://github.com/wbh604/UZI-Skill/issues/69) 在 CentOS-like + Python 3.11 跑一键脚本：`line 95: pip: command not found` + akshare 装不上
+- **位置**：`install-hermes.sh` line ~94（装依赖段）
+- **根因**：很多 Linux 发行版（Debian/Ubuntu/CentOS/RHEL）**默认不提供 plain `pip` 命令** · 用户必须用 `pip3` / `python3 -m pip` · 我们脚本只试 `pip` 直接报错 · 后续 akshare 报"找不到 wheel"其实是因为底层 pip 不存在 · 不是真的 wheel 不兼容
+- **修法**：
+  1. 启动加 Python 版本预检（`python3` → `python` 探测 + 版本 ≥3.10 检查）· 警告而非阻断 · 给三种系统的安装命令
+  2. pip 探测改为 5 层级联：`$HERMES/venv/bin/pip` → `$HERMES/.venv/bin/pip` → `pip` → `pip3` → `$PY_BIN -m pip`
+  3. 全部探测失败 → exit 4 + 给 apt / yum / ensurepip / get-pip 四种安装路径
+  4. `pip install` 失败 → exit 5 + 提示版本/镜像源/升级 pip
+- **验证**：
+  - `bash -n install-hermes.sh` 语法过
+  - 测试 grep 验证脚本含 pip3 / -m pip / tuna.tsinghua / upgrade pip 等关键字
+- **未来改该区域注意事项**：
+  - 不要在主体代码里假设 `pip` 命令存在 · 用 `command -v` 探测
+  - `set -euo pipefail` 严格模式下任何 fail 立即退出 · 必须 *先* 探测再 *用*
+  - 镜像源 fallback 只在文案里建议 · 不要默认走清华源（部分海外用户访问慢）· 让用户主动加 `-i`
+
+---
+
 ## v3.6.1 (2026-05-29 · Hermes Skills Guard 假阳性绕过 · issue #66)
 
 ### BUG · `hermes skills install` 报 DANGEROUS · `--force` 覆盖不了

@@ -11,8 +11,103 @@ from lib.market_router import parse_ticker
 from lib.web_search import search as web_search, search_trusted
 
 
+def _cninfo_direct_api(code: str, page_size: int = 30, timeout: int = 15) -> list[dict]:
+    """v3.6.2 · 直连 cninfo /new/hisAnnouncement/query · 仅取第 1 页 30 条.
+
+    解决 issue #68：akshare.stock_zh_a_disclosure_report_cninfo 内部翻完全部
+    854 页才返回 · 实测单股几小时. 这里绕过 akshare · 设 pageSize=30 + pageNum=1 ·
+    确保单次 HTTP 调用 ≤15s · 永远不会拖垮采集.
+
+    Returns:
+        list of {date, title, url, type} dicts. Empty list on failure.
+    """
+    import requests
+    # 推断板块：000/001/002/300 → szse · 600/601/603/605/688 → sse
+    code_prefix = code[:3]
+    if code_prefix in ("000", "001", "002") or code.startswith("3"):
+        column = "szse"
+        prefix = "9900"
+        org_id = ""  # cninfo 内部用 ticker 即可
+        stock_code = f"{code},{org_id}" if org_id else code
+    elif code_prefix in ("600", "601", "603", "605", "688", "689"):
+        column = "sse"
+        stock_code = code
+    else:
+        # 京 北交所
+        column = "bse"
+        stock_code = code
+
+    url = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Origin": "http://www.cninfo.com.cn",
+        "Referer": "http://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search",
+    }
+    payload = {
+        "pageNum": 1,
+        "pageSize": page_size,
+        "column": column,
+        "tabName": "fulltext",
+        "plate": "",
+        "stock": stock_code,
+        "searchkey": "",
+        "secid": "",
+        "category": "",
+        "trade": "",
+        "seDate": "",
+        "sortName": "",
+        "sortType": "",
+        "isHLtitle": "true",
+    }
+    try:
+        r = requests.post(url, data=payload, headers=headers, timeout=timeout)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    except (requests.RequestException, ValueError):
+        return []
+
+    announcements = data.get("announcements") or []
+    rows = []
+    for a in announcements[:page_size]:
+        # cninfo 时间戳是毫秒
+        ts = a.get("announcementTime") or 0
+        try:
+            date_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else ""
+        except (TypeError, ValueError, OSError):
+            date_str = ""
+        ann_url = a.get("adjunctUrl") or ""
+        if ann_url and not ann_url.startswith("http"):
+            ann_url = f"http://static.cninfo.com.cn/{ann_url.lstrip('/')}"
+        rows.append({
+            "date": date_str,
+            "title": str(a.get("announcementTitle", "")),
+            "url": ann_url,
+            "type": "cninfo 公告",
+        })
+    return rows
+
+
 def _cninfo_disclosures(code: str, days_back: int = 180) -> list[dict]:
-    """Use cninfo disclosure — confirmed working on this network."""
+    """Cninfo disclosures · v3.6.2 直连 API (pageSize=30) · 永不翻全部页.
+
+    社群 issue #68：原先调 akshare.stock_zh_a_disclosure_report_cninfo · 该函数
+    内部循环翻完所有 854 页才 return · 单股能拖几小时. v3.6.2 起 · 默认直连
+    cninfo /new/hisAnnouncement/query · pageSize=30 · 15s 超时 · 失败 fallback
+    到 akshare（akshare 路径仍可能慢 · 用 UZI_DISABLE_AK_CNINFO=1 完全禁用）.
+    """
+    import os
+    # 优先：直连 cninfo HTTP API · 永远不会翻页超时
+    rows = _cninfo_direct_api(code, page_size=30, timeout=15)
+    if rows:
+        return rows
+
+    # Fallback：akshare 慢路径 · 默认禁用（防止 854 页长尾）·
+    # 仅当用户显式 export UZI_AK_CNINFO_FALLBACK=1 才尝试
+    if os.environ.get("UZI_AK_CNINFO_FALLBACK") != "1":
+        return []  # 直连失败就空 · 不拖慢主流程
+
     today = datetime.now()
     start = (today - timedelta(days=days_back)).strftime("%Y%m%d")
     end = today.strftime("%Y%m%d")

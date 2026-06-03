@@ -35,6 +35,33 @@ echo "  Hermes:  $HERMES_HOME"
 echo "  Skills:  ${SKILLS[*]}"
 echo ""
 
+# v3.6.2 · issue #69 · 启动先做 Python 版本预检 + pip 探测
+# 缺 pip 不该静默失败 · 提前断言给清晰指引
+echo "🐍 检查 Python 环境..."
+PY_BIN=""
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    PY_BIN="$cand"
+    break
+  fi
+done
+if [ -z "$PY_BIN" ]; then
+  echo "❌ 未检测到 python3 / python · 请先装 Python ≥3.10"
+  echo "   Ubuntu/Debian:  sudo apt install python3 python3-pip python3-venv"
+  echo "   CentOS/RHEL:    sudo yum install python3 python3-pip"
+  echo "   macOS:          brew install python@3.12"
+  exit 3
+fi
+PY_VER=$("$PY_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+echo "   Python:  $PY_BIN ($PY_VER)"
+# akshare ≥1.14 要 Python ≥3.10 · 3.9 之前的版本会报 invalid syntax (PEP 604 联合类型)
+if "$PY_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+  :  # OK
+else
+  echo "⚠️  Python $PY_VER 偏低 · 建议 ≥3.10（akshare ≥1.14 / 我们的代码用了 PEP 604 联合类型）"
+  echo "   继续装的话 akshare / 部分 fetcher 可能不工作"
+fi
+
 # 1) 先检查 Hermes 装了没
 if [ ! -d "$HERMES_HOME" ]; then
   echo "❌ 未检测到 Hermes 安装目录 $HERMES_HOME"
@@ -79,23 +106,62 @@ for s in "${SKILLS[@]}"; do
 done
 
 # 5) 装 Python 依赖到 Hermes venv
+# v3.6.2 · issue #69 · pip 探测级联 (venv → pip → pip3 → python -m pip) ·
+# 缺 plain pip 的 Linux (常见！) 现在也能装
 echo ""
 echo "📦 安装 Python 依赖..."
-VENV_PIP=""
+REQ_FILE="$CLONE_DIR/requirements.txt"
+
+# 5a) 优先 Hermes venv pip（隔离 · 干净）
+PIP_CMD=""
 for cand in "$HERMES_HOME/venv/bin/pip" "$HERMES_HOME/.venv/bin/pip"; do
   if [ -x "$cand" ]; then
-    VENV_PIP="$cand"
+    PIP_CMD="$cand"
     break
   fi
 done
 
-REQ_FILE="$CLONE_DIR/requirements.txt"
-if [ -z "$VENV_PIP" ]; then
-  echo "   ⚠️  未找到 Hermes venv pip · 用系统 pip 装"
-  pip install -r "$REQ_FILE" --quiet || pip3 install -r "$REQ_FILE" --quiet
-else
-  echo "   pip = $VENV_PIP"
-  "$VENV_PIP" install -r "$REQ_FILE" --quiet
+# 5b) 没有 venv pip · 回退到系统 pip / pip3 / python -m pip 级联
+if [ -z "$PIP_CMD" ]; then
+  echo "   ⚠️  未找到 Hermes venv pip · 探测系统 pip..."
+  for cand in pip pip3; do
+    if command -v "$cand" >/dev/null 2>&1; then
+      PIP_CMD="$cand"
+      echo "   ✓ 找到 $cand"
+      break
+    fi
+  done
+fi
+
+# 5c) 还没有 · 走 python -m pip (Linux 上最稳的兜底)
+if [ -z "$PIP_CMD" ]; then
+  if "$PY_BIN" -m pip --version >/dev/null 2>&1; then
+    PIP_CMD="$PY_BIN -m pip"
+    echo "   ✓ 用 $PY_BIN -m pip (兜底)"
+  fi
+fi
+
+# 5d) 全部探测失败 · 提示用户先装 pip · 不静默 failure
+if [ -z "$PIP_CMD" ]; then
+  echo "   ❌ 完全找不到 pip · 请先装 pip 再重跑此脚本"
+  echo "      Ubuntu/Debian:  sudo apt install python3-pip"
+  echo "      CentOS/RHEL:    sudo yum install python3-pip"
+  echo "      macOS:          python3 -m ensurepip --upgrade"
+  echo "      或全局装:        curl https://bootstrap.pypa.io/get-pip.py | $PY_BIN"
+  exit 4
+fi
+
+echo "   pip = $PIP_CMD"
+# 不加 --quiet · 让用户看到进度（akshare 装包慢 · 静默会显得卡死）
+if ! $PIP_CMD install -r "$REQ_FILE"; then
+  echo ""
+  echo "   ❌ pip install 失败 · 可能原因："
+  echo "      1. Python 版本太低（需 ≥3.10 · 当前 $PY_VER）"
+  echo "      2. 网络受限 · 试加镜像源："
+  echo "         $PIP_CMD install -r $REQ_FILE -i https://pypi.tuna.tsinghua.edu.cn/simple"
+  echo "      3. 系统 pip 太老 · 升级一下："
+  echo "         $PIP_CMD install --upgrade pip"
+  exit 5
 fi
 
 # 6) 验证
