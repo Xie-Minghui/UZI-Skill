@@ -301,6 +301,40 @@ def main():
                              "输出排名 + 加权评分 + 健康度 · 自动 resume")
     parser.add_argument("--output-dir", metavar="DIR", default=None,
                         help="v2.11.0 · SaaS 集成：把产出（standalone html + 图 + 摘要）拷贝到该目录，并在其中生成 index.html / report.meta.json。建议配合 --no-browser 使用。")
+
+    # ─── v4.0 新增：行业分析功能 ───
+    # 功能 1：行业筛选
+    parser.add_argument("--industry", type=str, default=None,
+                        help="v4.0 · 分析单个行业（如 --industry 白酒）")
+    parser.add_argument("--compare-industries", type=str, default=None,
+                        help="v4.0 · 对比多个行业（逗号分隔，如 --compare-industries 白酒,新能源,医药）")
+    
+    # 功能 2：行业选股
+    parser.add_argument("--screen-industry", type=str, default=None,
+                        help="v4.0 · 从行业中筛选推荐股票（如 --screen-industry 白酒）")
+    parser.add_argument("--criteria", type=str, choices=["value", "growth", "balanced", "aggressive"],
+                        default="balanced",
+                        help="v4.0 · 筛选标准：value(价值型) / growth(成长型) / balanced(均衡型) / aggressive(激进型)")
+    
+    # 功能 3：组合诊断
+    parser.add_argument("--portfolio-advice", type=str, default=None,
+                        help="v4.0 · 分析持仓组合并给出建议（CSV 文件路径，如 --portfolio-advice holdings.csv）")
+    
+    # 功能串联：智能投顾
+    parser.add_argument("--recommend", type=str, default=None,
+                        help="v4.0 · 智能投顾：选择行业+筛选股票+配置资金（行业列表逗号分隔，如 --recommend 白酒,新能源,医药）")
+    parser.add_argument("--budget", type=float, default=100000,
+                        help="v4.0 · 预算（元），默认 100000")
+    parser.add_argument("--risk", type=str, choices=["conservative", "moderate", "aggressive"],
+                        default="moderate",
+                        help="v4.0 · 风险偏好：conservative(保守) / moderate(稳健) / aggressive(激进)")
+    
+    # 通用参数
+    parser.add_argument("--top-n", type=int, default=10,
+                        help="v4.0 · 分析的龙头股数量，默认 10")
+    parser.add_argument("--detailed", action="store_true",
+                        help="v4.0 · 生成详细报告（默认只返回摘要）")
+
     args = parser.parse_args()
 
     # v2.10.5 · run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）。
@@ -376,6 +410,102 @@ def main():
             sys.exit(0)
         else:
             print(f"⚠️  组合分析失败 · {result}")
+            sys.exit(1)
+
+    # ─── v4.0 新增：行业分析功能 ───
+    # 功能 1：行业筛选
+    if args.industry:
+        print(f"\n📊 启动行业分析: {args.industry}")
+        try:
+            from lib.analysis.industry_analyzer import analyze_industry
+            result = analyze_industry(
+                args.industry,
+                top_n=args.top_n,
+                detailed=args.detailed
+            )
+            print(f"\n✅ 行业分析完成: {result['rating']}")
+            print(f"   评分: {result['overall_score']}")
+            if result.get("report_path"):
+                print(f"   报告: {result['report_path']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ 行业分析失败: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+    if args.compare_industries:
+        print(f"\n📊 启动行业对比: {args.compare_industries}")
+        try:
+            from lib.analysis.industry_analyzer import compare_industries
+            industry_list = [x.strip() for x in args.compare_industries.split(",")]
+            result = compare_industries(industry_list)
+            print(f"\n✅ 行业对比完成")
+            print(f"   最佳行业: {result['best_industry']}")
+            print(f"   评分: {result['best_score']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ 行业对比失败: {e}")
+            sys.exit(1)
+
+    # 功能 2：行业选股
+    if args.screen_industry:
+        print(f"\n🔍 启动行业选股: {args.screen_industry} (标准: {args.criteria})")
+        try:
+            from lib.analysis.stock_screener import screen_industry
+            result = screen_industry(
+                args.screen_industry,
+                criteria=args.criteria,
+                top_n=args.top_n,
+                detailed=args.detailed
+            )
+            print(f"\n✅ 选股完成")
+            print(f"   推荐股票: {len(result['recommended'])} 只")
+            for stock in result["recommended"]:
+                print(f"   - {stock['name']} ({stock['ticker']}) - 评分: {stock['score']}")
+            if result.get("report_path"):
+                print(f"   报告: {result['report_path']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ 选股失败: {e}")
+            sys.exit(1)
+
+    # 功能 3：组合诊断
+    if args.portfolio_advice:
+        print(f"\n💼 启动组合诊断: {args.portfolio_advice}")
+        try:
+            from lib.analysis.portfolio_advisor import analyze_portfolio
+            result = analyze_portfolio(args.portfolio_advice)
+            print(f"\n✅ 组合诊断完成")
+            print(f"   组合健康度: {result['portfolio_health']}")
+            print(f"   建议: 买入 {result['buy_count']} / 卖出 {result['sell_count']} / 持有 {result['hold_count']}")
+            if result.get("report_path"):
+                print(f"   报告: {result['report_path']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ 组合诊断失败: {e}")
+            sys.exit(1)
+
+    # 功能串联：智能投顾
+    if args.recommend:
+        print(f"\n🎯 启动智能投顾: {args.recommend}")
+        try:
+            from lib.analysis.recommend_engine import recommend_portfolio
+            industry_list = [x.strip() for x in args.recommend.split(",")]
+            result = recommend_portfolio(
+                industry_list,
+                budget=args.budget,
+                risk_tolerance=args.risk
+            )
+            print(f"\n✅ 投资建议生成完成")
+            print(f"   推荐行业: {result['selected_industry']}")
+            print(f"   推荐股票: {len(result['recommended_stocks'])} 只")
+            print(f"   预期收益: {result['expected_return']}")
+            if result.get("report_path"):
+                print(f"   报告: {result['report_path']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n❌ 智能投顾失败: {e}")
             sys.exit(1)
 
     env = detect_environment()

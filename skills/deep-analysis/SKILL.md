@@ -10,6 +10,84 @@ metadata:
     related_skills: [investor-panel, lhb-analyzer, trap-detector]
 ---
 
+## 🆕 v4.0 新增功能（2026-07-05）
+
+UZI-Skill v4.0 新增三大功能模块，支持行业分析和组合诊断。
+
+### 功能 1：行业筛选 (`/analyze-industry`)
+
+**用途**：判断哪个行业值得入手。
+
+**命令**：
+```bash
+/stock-deep-analyzer:analyze-industry 白酒
+/stock-deep-analyzer:compare-industries 白酒,新能源,医药
+```
+
+**输出**：行业评分、TOP 3 推荐股票、看多/看空理由。
+
+---
+
+### 功能 2：行业选股 (`/screen-industry`)
+
+**用途**：从行业中选择推荐买入的股票。
+
+**命令**：
+```bash
+/stock-deep-analyzer:screen-industry 白酒 --criteria balanced
+```
+
+**筛选标准**：
+- `value`：价值型（低 PE + 高股息）
+- `growth`：成长型（高增速）
+- `balanced`：均衡型（综合评分 TOP 3）
+- `aggressive`：激进型（游资偏好）
+
+---
+
+### 功能 3：组合诊断 (`/portfolio-advice`)
+
+**用途**：针对自己的持仓组合，给出买入/卖出/持有建议。
+
+**命令**：
+```bash
+/stock-deep-analyzer:portfolio-advice --file holdings.csv
+```
+
+**CSV 格式**：
+```csv
+ticker,shares,avg_cost
+600519.SH,100,1800
+000858.SZ,200,120
+```
+
+---
+
+### 功能串联：智能投顾 (`/recommend-portfolio`)
+
+**用途**：完整投资决策流程（选择行业 → 选择股票 → 配置资金）。
+
+**命令**：
+```bash
+/stock-deep-analyzer:recommend-portfolio 白酒,新能源,医药 --budget 10万 --risk moderate
+```
+
+**流程**：
+1. 筛选最佳行业（功能 1）
+2. 从行业中选择推荐股票（功能 2）
+3. 生成组合配置方案（功能 3）
+
+---
+
+### 📖 详细文档
+
+- **设计文档**：`update.md`
+- **架构流程图**：`docs/architecture-v4.0.md`
+- **使用指南**：`docs/user-guide-v4.0.md`
+- **实现指南**：`docs/implementation-guide-v4.0.md`
+
+---
+
 # Stock Deep Analysis · 深度分析工作流 v2.2
 
 > 你正在扮演一位**首席股票分析师**。你身边有一套完整的量化工具箱，但最终的判断和叙事**必须你来写**。
