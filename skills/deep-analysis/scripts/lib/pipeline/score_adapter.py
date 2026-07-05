@@ -13,6 +13,8 @@ from typing import Dict, List, Optional
 from pathlib import Path
 import json
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 添加 scripts 目录到 sys.path
 HERE = Path(__file__).parent.parent / "skills" / "deep-analysis" / "scripts"
@@ -59,10 +61,10 @@ class ScoreEngine:
     
     def _score_industry(self, data: Dict) -> Dict:
         """
-        行业评分 - 复用现有评分函数
+        行业评分 - 复用现有评分函数（并行优化）
         
         流程：
-        1. 对每只成分股调用 score_dimensions()
+        1. 对每只成分股调用 score_dimensions()（并行）
         2. 生成每只股票的 panel.json
         3. 聚合评分（按市值加权平均）
         4. 生成行业级 panel（66 评委对行业的看法）
@@ -71,20 +73,35 @@ class ScoreEngine:
         stocks_data = data["stocks"]
         
         print(f"   📊 评分行业: {industry_name} ({len(stocks_data)} 只股票)")
+        print(f"   🚀 使用并行评分 (max_workers=6)")
         
-        # 1. 对每只成分股评分
+        # 1. 对每只成分股评分（并行）
         stock_scores = {}
-        for ticker, stock_data in stocks_data.items():
-            if stock_data is None:
-                print(f"   ⚠️ 跳过 {ticker} (数据缺失)")
-                continue
-            
-            print(f"   📊 评分 {ticker}...")
-            try:
-                stock_scores[ticker] = self._call_legacy_score(stock_data)
-            except Exception as e:
-                print(f"   ❌ {ticker} 评分失败: {e}")
-                stock_scores[ticker] = None
+        
+        # 准备有效的股票数据
+        valid_stocks = {ticker: data for ticker, data in stocks_data.items() if data is not None}
+        
+        if not valid_stocks:
+            print(f"   ⚠️ 没有有效的股票数据")
+        else:
+            # 使用 ThreadPoolExecutor 并行评分
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                # 提交所有评分任务
+                future_to_ticker = {
+                    executor.submit(self._call_legacy_score, stock_data): ticker
+                    for ticker, stock_data in valid_stocks.items()
+                }
+                
+                # 收集结果
+                for future in as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        score = future.result()
+                        stock_scores[ticker] = score
+                        print(f"   ✅ {ticker} 评分完成")
+                    except Exception as e:
+                        print(f"   ❌ {ticker} 评分失败: {e}")
+                        stock_scores[ticker] = None
         
         # 2. 聚合评分
         industry_score = self._aggregate_scores(stock_scores)
@@ -187,11 +204,12 @@ class ScoreEngine:
         
         for ticker, score in valid_scores:
             # 从 panel 中获取综合评分
+            # 注意：字段名是 panel_consensus 而不是 overall_score
             panel = score.get("panel", {})
-            overall_score = panel.get("overall_score", 0)
+            panel_consensus = panel.get("panel_consensus", 0)
             
-            if overall_score:
-                total_score += overall_score
+            if panel_consensus:
+                total_score += panel_consensus
                 count += 1
         
         avg_score = total_score / count if count > 0 else 0
@@ -199,7 +217,7 @@ class ScoreEngine:
         # 找出 TOP 和 BOTTOM
         sorted_stocks = sorted(
             valid_scores,
-            key=lambda x: x[1].get("panel", {}).get("overall_score", 0),
+            key=lambda x: x[1].get("panel", {}).get("panel_consensus", 0),
             reverse=True
         )
         
