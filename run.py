@@ -317,6 +317,12 @@ def main():
         from lib.analysis_profile import get_profile, apply_profile_to_env, format_banner
         profile = get_profile(args.depth) if args.depth else get_profile()
         apply_profile_to_env(profile)
+        if profile.depth == "lite":
+            # quick-scan should stay best-effort: mini_racer-backed akshare calls can
+            # abort the whole Python process on macOS, and HTML self-review should not
+            # block a 1-2 minute scan when an optional valuation source is skipped.
+            os.environ.setdefault("UZI_DISABLE_MINI_RACER", "1")
+            os.environ.setdefault("UZI_SKIP_REVIEW", "1")
         print(f"\n{format_banner(profile)}\n")
     except Exception as _e:
         print(f"⚠️ 无法加载 analysis_profile: {_e}")
