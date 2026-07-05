@@ -234,22 +234,139 @@ class ScoreEngine:
         生成行业级 panel（66 评委对行业的看法）
         
         实现逻辑：
-        - 不是对单股，而是对行业趋势、估值、政策等打分
-        - 复用现有评委规则，但调整输入为行业级数据
+        1. 从成分股的 panel 中收集所有评委意见
+        2. 对每个评委，统计其在成分股中的 signal 分布
+        3. 确定评委对行业的整体看法（少数服从多数）
+        4. 计算行业级 bullish/bearish/neutral 分布
+        5. 提取 TOP 看多/看空评委及理由
         """
         print(f"   📊 生成行业 panel...")
         
-        # TODO: 实现真实的行业级评委逻辑
-        # 临时返回示例数据
+        industry_name = self.target.name
+        
+        # 1. 收集所有成分股的评委意见
+        # all_investor_signals: {investor_id: [signal1, signal2, ...]}
+        all_investor_signals = {}
+        all_investor_scores = {}
+        all_investor_reasoning = {}
+        
+        for ticker, score in stock_scores.items():
+            if score is None:
+                continue
+            
+            panel = score.get("panel", {})
+            investors = panel.get("investors", [])
+            
+            for inv in investors:
+                inv_id = inv["investor_id"]
+                signal = inv["signal"]
+                inv_score = inv.get("score", 50)
+                reasoning = inv.get("reasoning", "")
+                
+                # 收集 signal
+                if inv_id not in all_investor_signals:
+                    all_investor_signals[inv_id] = []
+                    all_investor_scores[inv_id] = []
+                    all_investor_reasoning[inv_id] = []
+                
+                all_investor_signals[inv_id].append(signal)
+                all_investor_scores[inv_id].append(inv_score)
+                all_investor_reasoning[inv_id].append(reasoning)
+        
+        # 2. 确定每个评委对行业的整体看法
+        industry_investor_verdicts = []
+        
+        for inv_id, signals in all_investor_signals.items():
+            # 统计 signal 分布
+            bullish_count = signals.count("bullish")
+            bearish_count = signals.count("bearish")
+            neutral_count = signals.count("neutral")
+            skip_count = signals.count("skip")
+            
+            total = len(signals)
+            if total == 0:
+                continue
+            
+            # 计算加权平均评分
+            avg_score = sum(all_investor_scores[inv_id]) / len(all_investor_scores[inv_id])
+            
+            # 确定行业级 signal（少数服从多数）
+            if skip_count / total > 0.5:
+                industry_signal = "skip"
+            elif bullish_count / total > 0.4:  # 40% 以上看多 → 整体看多
+                industry_signal = "bullish"
+            elif bearish_count / total > 0.4:  # 40% 以上看空 → 整体看空
+                industry_signal = "bearish"
+            else:
+                industry_signal = "neutral"
+            
+            # 提取最具代表性的理由（评分最高的那只股票的理由）
+            max_score_idx = all_investor_scores[inv_id].index(max(all_investor_scores[inv_id]))
+            key_reasoning = all_investor_reasoning[inv_id][max_score_idx] if all_investor_reasoning[inv_id] else ""
+            
+            industry_investor_verdicts.append({
+                "investor_id": inv_id,
+                "signal": industry_signal,
+                "score": int(avg_score),
+                "bullish_ratio": bullish_count / total,
+                "reasoning": key_reasoning
+            })
+        
+        # 3. 统计行业级投票分布
+        signal_dist = {"bullish": 0, "bearish": 0, "neutral": 0, "skip": 0}
+        for verdict in industry_investor_verdicts:
+            sig = verdict["signal"]
+            if sig in signal_dist:
+                signal_dist[sig] += 1
+        
+        # 4. 找出 TOP 看多/看空评委
+        bullish_investors = [v for v in industry_investor_verdicts if v["signal"] == "bullish"]
+        bearish_investors = [v for v in industry_investor_verdicts if v["signal"] == "bearish"]
+        
+        # 按评分排序
+        bullish_investors.sort(key=lambda x: x["score"], reverse=True)
+        bearish_investors.sort(key=lambda x: x["score"])
+        
+        top_bullish = [v["investor_id"] for v in bullish_investors[:5]]
+        top_bearish = [v["investor_id"] for v in bearish_investors[:5]]
+        
+        # 5. 生成整体共识
+        total_active = signal_dist["bullish"] + signal_dist["neutral"] + signal_dist["bearish"]
+        if total_active == 0:
+            overall_consensus = "无法判断"
+        else:
+            bullish_pct = signal_dist["bullish"] / total_active * 100
+            if bullish_pct >= 60:
+                overall_consensus = "强烈看多"
+            elif bullish_pct >= 45:
+                overall_consensus = "偏多"
+            elif bullish_pct >= 40:
+                overall_consensus = "中性偏多"
+            elif bullish_pct >= 35:
+                overall_consensus = "中性"
+            elif bullish_pct >= 25:
+                overall_consensus = "中性偏空"
+            else:
+                overall_consensus = "偏空"
+        
+        # 6. 提取核心理由（从 TOP 评委的理由中提炼）
+        key_reasons = []
+        for v in bullish_investors[:3]:
+            if v["reasoning"]:
+                key_reasons.append(v["reasoning"][:100])  # 截取前 100 字符
+        key_reason = "；".join(key_reasons) if key_reasons else "行业整体估值合理，龙头股基本面扎实"
+        
         return {
-            "industry_name": self.target.name,
-            "overall_consensus": "中性偏多",
-            "bullish_count": 35,
-            "bearish_count": 20,
-            "neutral_count": 11,
-            "top_bullish": ["巴菲特", "段永平", "张磊"],
-            "top_bearish": ["卡拉曼", "索罗斯", "Chanos"],
-            "key_reason": "行业估值合理，龙头股护城河深厚，政策支持消费复苏"
+            "industry_name": industry_name,
+            "overall_consensus": overall_consensus,
+            "bullish_count": signal_dist["bullish"],
+            "bearish_count": signal_dist["bearish"],
+            "neutral_count": signal_dist["neutral"],
+            "skip_count": signal_dist["skip"],
+            "top_bullish": top_bullish,
+            "top_bearish": top_bearish,
+            "key_reason": key_reason,
+            "investor_verdicts": industry_investor_verdicts  # 所有评委的行业级看法
         }
     
     def _calculate_portfolio_score(self, holdings_scores: Dict, holdings: List[Dict]) -> Dict:

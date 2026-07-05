@@ -325,7 +325,7 @@ class PortfolioAdvisor:
                 "current_cost": avg_cost,
                 "current_price": current_price,
                 "profit_loss": profit_loss_pct,
-                "score": score.get("panel", {}).get("overall_score", 0),
+                "score": score.get("panel", {}).get("panel_consensus", 0),
                 "suggest": suggest,
                 "target_position": target_position,
                 "reason": reason
@@ -402,7 +402,7 @@ class PortfolioAdvisor:
         - 评分 < 50 → sell
         - 50 <= 评分 < 80 → hold
         """
-        overall_score = score.get("panel", {}).get("overall_score", 0)
+        overall_score = score.get("panel", {}).get("panel_consensus", 0)
         
         if current_price and avg_cost in holding:
             profit_loss = (current_price - holding["avg_cost"]) / holding["avg_cost"]
@@ -425,7 +425,7 @@ class PortfolioAdvisor:
     
     def _calculate_target_position(self, ticker: str, score: Dict) -> str:
         """计算目标仓位"""
-        overall_score = score.get("panel", {}).get("overall_score", 0)
+        overall_score = score.get("panel", {}).get("panel_consensus", 0)
         
         # 简单逻辑：评分越高，仓位越重
         if overall_score >= 80:
@@ -441,7 +441,7 @@ class PortfolioAdvisor:
                          score: Dict, suggest: str) -> str:
         """生成建议理由"""
         panel = score.get("panel", {})
-        overall_score = panel.get("overall_score", 0)
+        overall_score = panel.get("panel_consensus", 0)
         
         reasons = []
         

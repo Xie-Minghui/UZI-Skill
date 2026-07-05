@@ -336,6 +336,9 @@ def main():
                         help="v4.0 · 生成详细报告（默认只返回摘要）")
 
     args = parser.parse_args()
+    
+    # 检测环境（供 v4.0 功能和后续代码使用）
+    env = detect_environment()
 
     # v2.10.5 · run.py 是 CLI 直跑入口（agent 流程走 stage1/stage2 直接调用，不经 run.py）。
     # 设 UZI_CLI_ONLY=1 让 self_review 对 agent_analysis.json 缺失 / 低 coverage 做宽容处理
@@ -425,8 +428,41 @@ def main():
             )
             print(f"\n✅ 行业分析完成: {result['rating']}")
             print(f"   评分: {result['overall_score']}")
+            
+            # 打开报告（如果生成了）
             if result.get("report_path"):
-                print(f"   报告: {result['report_path']}")
+                report_path = Path(result["report_path"])
+                print(f"   报告: {report_path}")
+                
+                # 打开浏览器（与单股分析逻辑一致）
+                if env["has_browser"] and not args.no_browser and not args.remote:
+                    import webbrowser
+                    webbrowser.open(report_path.as_uri())
+                    print(f"   🌐 已在浏览器中打开")
+                
+                # 远程模式
+                if args.remote:
+                    httpd = serve_report(report_path, args.port)
+                    filename = report_path.name
+                    public_url = start_cloudflare_tunnel(args.port)
+                    
+                    if public_url:
+                        full_url = f"{public_url}/{filename}"
+                        print(f"\n{'━' * 50}")
+                        print(f"📱 远程查看地址:")
+                        print(f"   {full_url}")
+                        print(f"{'━' * 50}")
+                        
+                        if env["has_browser"] and not args.no_browser:
+                            webbrowser.open(full_url)
+                        
+                        try:
+                            while True:
+                                time.sleep(1)
+                        except KeyboardInterrupt:
+                            print("\n⏹  服务已停止")
+                            httpd.shutdown()
+            
             sys.exit(0)
         except Exception as e:
             print(f"\n❌ 行业分析失败: {e}")
@@ -443,6 +479,17 @@ def main():
             print(f"\n✅ 行业对比完成")
             print(f"   最佳行业: {result['best_industry']}")
             print(f"   评分: {result['best_score']}")
+            
+            # 打开报告（如果生成了）
+            if result.get("report_path"):
+                report_path = Path(result["report_path"])
+                print(f"   报告: {report_path}")
+                
+                if env["has_browser"] and not args.no_browser and not args.remote:
+                    import webbrowser
+                    webbrowser.open(report_path.as_uri())
+                    print(f"   🌐 已在浏览器中打开")
+            
             sys.exit(0)
         except Exception as e:
             print(f"\n❌ 行业对比失败: {e}")
@@ -463,8 +510,17 @@ def main():
             print(f"   推荐股票: {len(result['recommended'])} 只")
             for stock in result["recommended"]:
                 print(f"   - {stock['name']} ({stock['ticker']}) - 评分: {stock['score']}")
+            
+            # 打开报告（如果生成了）
             if result.get("report_path"):
-                print(f"   报告: {result['report_path']}")
+                report_path = Path(result["report_path"])
+                print(f"   报告: {report_path}")
+                
+                if env["has_browser"] and not args.no_browser and not args.remote:
+                    import webbrowser
+                    webbrowser.open(report_path.as_uri())
+                    print(f"   🌐 已在浏览器中打开")
+            
             sys.exit(0)
         except Exception as e:
             print(f"\n❌ 选股失败: {e}")
@@ -479,8 +535,17 @@ def main():
             print(f"\n✅ 组合诊断完成")
             print(f"   组合健康度: {result['portfolio_health']}")
             print(f"   建议: 买入 {result['buy_count']} / 卖出 {result['sell_count']} / 持有 {result['hold_count']}")
+            
+            # 打开报告（如果生成了）
             if result.get("report_path"):
-                print(f"   报告: {result['report_path']}")
+                report_path = Path(result["report_path"])
+                print(f"   报告: {report_path}")
+                
+                if env["has_browser"] and not args.no_browser and not args.remote:
+                    import webbrowser
+                    webbrowser.open(report_path.as_uri())
+                    print(f"   🌐 已在浏览器中打开")
+            
             sys.exit(0)
         except Exception as e:
             print(f"\n❌ 组合诊断失败: {e}")
@@ -501,14 +566,23 @@ def main():
             print(f"   推荐行业: {result['selected_industry']}")
             print(f"   推荐股票: {len(result['recommended_stocks'])} 只")
             print(f"   预期收益: {result['expected_return']}")
+            
+            # 打开报告（如果生成了）
             if result.get("report_path"):
-                print(f"   报告: {result['report_path']}")
+                report_path = Path(result["report_path"])
+                print(f"   报告: {report_path}")
+                
+                if env["has_browser"] and not args.no_browser and not args.remote:
+                    import webbrowser
+                    webbrowser.open(report_path.as_uri())
+                    print(f"   🌐 已在浏览器中打开")
+            
             sys.exit(0)
         except Exception as e:
             print(f"\n❌ 智能投顾失败: {e}")
             sys.exit(1)
 
-    env = detect_environment()
+    # env 已在前面定义（第 341 行），此处不再重复
 
     print()
     print("━" * 50)

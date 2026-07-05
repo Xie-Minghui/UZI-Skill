@@ -209,7 +209,7 @@ class StockScreener:
             pb = basic.get("pb")
             dividend_yield = valuation.get("dividend_yield")
             
-            overall_score = panel.get("overall_score", 0)
+            overall_score = panel.get("panel_consensus", 0)
             
             # 价值型标准：
             # 1. PE < 30
@@ -277,7 +277,7 @@ class StockScreener:
         return {
             "ticker": ticker,
             "name": basic.get("name", ticker),
-            "score": panel.get("overall_score", 0),
+            "score": panel.get("panel_consensus", 0),
             "reason": self._generate_reason(ticker, score),
             "target_price": self._calculate_target_price(score),
             "position_suggestion": "20%"  # 临时：固定 20%
